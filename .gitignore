@@ -1,10 +1,13 @@
 data/*
 !data/.gitkeep
 *.sqlite
+!dataset/index.sqlite
 *.sqlite-journal
+backups/
 __pycache__/
 *.pyc
 .env
 .venv/
-run.tex
+run.txt
 TODO.md
+COMMIT_GUIDE.md
