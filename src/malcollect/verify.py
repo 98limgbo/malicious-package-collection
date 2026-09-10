@@ -1,7 +1,8 @@
-"""트랙 B: OSV API 기반 재검증 (on-demand 실행, 자동 스케줄 없음).
+"""재검증: OSV API 기반 (on-demand 실행, 자동 스케줄 없음).
 
-연구 데이터로 사용하기 전에 반드시 한 번 실행할 것 (docs/design.md 체크리스트 참고).
-collect.py(트랙 A)는 osv_verification_status를 절대 건드리지 않음 - 이 파일만 관리.
+연구 데이터로 사용하기 전에 반드시 한 번 실행할 것 - collect.py는 철회(오탐)된 리포트도
+그대로 수집하므로(docs/design.md "보존 정책" 참고), 재검증 없이는 오탐이 섞여 있을 수 있음.
+collect.py(수집)는 osv_verification_status를 절대 건드리지 않음 - 이 파일만 관리.
 
 사용법:
     python scripts/run_verify.py                # 파일을 확보한 리포트 전체 재검증
@@ -130,7 +131,7 @@ def run(mal_id: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="OSV API 기반 재검증 (트랙 B)")
+    parser = argparse.ArgumentParser(description="OSV API 기반 재검증")
     parser.add_argument("--mal-id", help="특정 MAL-ID만 재검증", default=None)
     args = parser.parse_args()
     run(mal_id=args.mal_id)

@@ -32,7 +32,7 @@ def _now() -> str:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="악성 패키지 수집 (트랙 A: 감지 + 다운로드)")
+    parser = argparse.ArgumentParser(description="악성 패키지 수집 (감지 + 다운로드)")
     parser.add_argument(
         "--since-days",
         type=int,

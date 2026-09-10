@@ -1,4 +1,4 @@
-"""트랙 A(감지): ossf/malicious-packages GitHub 저장소를 원본으로 직접 폴링한다.
+"""감지: ossf/malicious-packages GitHub 저장소를 원본으로 직접 폴링한다.
 
 OSV.dev API를 거치지 않는 이유는 docs/design.md의 "감지 신호" 섹션 참고 —
 OSV.dev importer가 15분 주기로만 반영하는 구조적 지연이 있어 GitHub가 항상 더 빠르다.

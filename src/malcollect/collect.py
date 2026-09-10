@@ -1,4 +1,4 @@
-"""트랙 A: 감지(GitHub) + 다운로드(원본만, 미러 없음) 오케스트레이션.
+"""수집: 감지(GitHub) + 다운로드(원본만, 미러 없음) 오케스트레이션.
 
 실행: python scripts/run_collect.py [--since-days N] [--loop]
 5분 주기로 반복 실행되는 것을 전제로 한다 (docs/design.md 참고).
@@ -321,7 +321,7 @@ def download_pending(conn) -> None:
         except ArtifactNotFound:
             conn.execute("DELETE FROM collected_artifacts WHERE rowid = ?", (row["rowid"],))
             # 다운로드는 실패해도 게시일 메타데이터는 남아있는 경우가 있어 별도로 조회 시도
-            # (실측: npm은 파일이 막혀도 time 이력은 남아있는 사례 확인됨 - docs/design.md 참고)
+            # (실측: npm은 파일이 막혀도 time 이력은 남아있는 사례 확인됨)
             try:
                 published_at = downloader.get_published_at(row["package_name"], row["version"])
             except Exception:
