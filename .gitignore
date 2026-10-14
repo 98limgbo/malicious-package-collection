@@ -4,6 +4,9 @@ data/*
 !dataset/index.sqlite
 *.sqlite-journal
 backups/
+research_notes/
+presentation_prep/
+presentation_prep/
 __pycache__/
 *.pyc
 .env
