@@ -5,9 +5,11 @@
 
 동작 순서:
 1. sync_state에 체크포인트가 없으면(첫 실행) -> OSV 벌크 zip(생태계별 all.zip)에서
-   MAL-2026-*(BACKFILL_ID_PREFIX) 전체 백필 (GitHub 트리 API는 대량 조회 시 잘려서 안 씀.
+   MAL-<올해>-* 전체 백필 (GitHub 트리 API는 대량 조회 시 잘려서 안 씀.
    개별 파일 조회보다 zip 통째로 받아 로컬 파싱하는 게 훨씬 빠름 - docs/design.md 참고)
    (--since-days N이 주어지면 테스트용으로 N일 전 커밋을 기준선으로 잡고 diff만 수행)
+   리포트를 반영할 때 철회된 리포트는 수집하지 않고(기존 파일은 삭제), 상한 없는 범위 리포트는
+   리포트 등록일 이후에 게시됐거나 게시일을 모르는 버전을 제외한다 (docs/design.md 참고)
 2. collected_artifacts에서 download_status='pending'인 것들 다운로드 시도
    (성공 -> 'success'로 갱신 + 파일 보존 + mal_reports.success_count 증가 / 실패 -> 행 삭제, 재시도 없음)
    성공/실패 무관하게 게시일 조회를 시도해 mal_reports.earliest_registry_published_at 갱신
@@ -30,10 +32,9 @@ from pathlib import Path
 import requests
 
 from . import config, db, github_source
-from .registries import ArtifactNotFound, DOWNLOADERS, get_downloader
+from .registries import ArtifactNotFound, DOWNLOADERS, PlaceholderArtifact, get_downloader
 
 STATE_LAST_SHA = "github_last_seen_sha"
-BACKFILL_ID_PREFIX = "MAL-2026-"
 OSV_BUCKET_BASE = "https://storage.googleapis.com/osv-vulnerabilities"
 
 
@@ -64,36 +65,81 @@ def _extract_finder(report: dict) -> str | None:
     return None
 
 
-def _resolve_versions(entry: dict, downloader) -> list[str]:
-    """OSV affected 항목 하나에서 실제로 시도할 버전 목록을 결정.
-    - 명시적 versions가 있으면 그대로 사용
+def _parse_ts(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _resolve_versions(
+    entry: dict, downloader, report_published_at: str | None
+) -> tuple[list[str], int]:
+    """OSV affected 항목 하나에서 실제로 시도할 버전 목록과 is_explicit_version 값을 결정.
+    - 명시적 versions가 있으면 그대로 사용 (is_explicit_version=1). 시간이 지나며 악성 버전이
+      목록에 추가되므로 리포트 등록일 이후 게시된 버전도 정상이라 컷오프를 적용하지 않음.
     - 없고, 범위(ranges)에 상한(fixed/last_affected)이 하나라도 있으면 -> 일부 버전만
-      악성이라는 뜻이라 위험, 스킵([])
-    - 없고, 범위가 전부 상한 없음(introduced만 있음) -> 전 버전이 악성이라는 뜻이므로
-      레지스트리에서 전체 게시 버전 목록을 조회해 전부 시도
-      (실사용 분석 결과 이런 케이스의 99.8%가 상한 없음이었음, docs/design.md 참고)
+      악성이라는 뜻이라 위험, 스킵
+    - 없고, 범위가 전부 상한 없음(introduced만 있음) -> 전 버전이 악성이라는 주장이므로
+      레지스트리에서 버전 목록을 조회하되 (is_explicit_version=0), 리포트 등록일 이후에
+      게시됐거나 게시일을 알 수 없는 버전은 제외. 리포트 작성자는 작성 시점에 존재하지 않던
+      버전을 검토할 수 없으므로 그런 버전이 악성이라는 근거가 없음 (docs/design.md 참고)
     """
     explicit = entry.get("versions") or []
     if explicit:
-        return explicit
+        return explicit, 1
 
     ranges = entry.get("ranges", [])
     if not ranges:
-        return []
+        return [], 0
 
     for r in ranges:
         events = r.get("events", [])
         if any(("fixed" in e or "last_affected" in e) for e in events):
-            return []  # 상한 있음 -> 일부만 악성, 위험하니 스킵
+            return [], 0  # 상한 있음 -> 일부만 악성, 위험하니 스킵
 
-    if downloader is None:
-        return []
+    if downloader is None or not report_published_at:
+        return [], 0
     name = entry.get("package", {}).get("name")
     try:
-        return downloader.list_versions(name)
+        candidates = downloader.list_versions_with_dates(name)
     except Exception as exc:
         print(f"[detect] list_versions failed for {name}: {exc}", flush=True)
-        return []
+        return [], 0
+
+    cutoff = _parse_ts(report_published_at)
+    kept = []
+    for version, published_at in candidates:
+        if not published_at:
+            continue  # 리포트 등록일 이전인지 확인할 수 없으면 받지 않음
+        try:
+            if _parse_ts(published_at) <= cutoff:
+                kept.append(version)
+        except ValueError:
+            continue
+    skipped = len(candidates) - len(kept)
+    if skipped:
+        print(
+            f"[detect] {name}: 전체 {len(candidates)}개 버전 중 리포트 등록일 이후/게시일 불명 "
+            f"{skipped}개 제외",
+            flush=True,
+        )
+    return kept, 0
+
+
+def _purge_report_artifacts(conn, mal_id: str) -> int:
+    """이 리포트의 수집 파일/행/폴더를 전부 삭제 (철회된 리포트용). 삭제한 파일 수를 반환."""
+    rows = conn.execute(
+        "SELECT file_path FROM collected_artifacts WHERE mal_id = ?", (mal_id,)
+    ).fetchall()
+    removed = 0
+    for row in rows:
+        if row["file_path"]:
+            path = Path(row["file_path"])
+            if path.exists():
+                path.unlink()
+                removed += 1
+            path.with_name(path.name + ".sha256").unlink(missing_ok=True)
+    conn.execute("DELETE FROM collected_artifacts WHERE mal_id = ?", (mal_id,))
+    _delete_report_files(mal_id)
+    return removed
 
 
 def _insert_report_and_versions(conn, report: dict) -> str | None:
@@ -140,19 +186,32 @@ def _insert_report_and_versions(conn, report: dict) -> str | None:
             (ecosystems_str, modified_at, report.get("withdrawn"), now, finder, mal_id),
         )
 
+    if report.get("withdrawn"):
+        # OSV가 오탐 등으로 철회한 리포트는 악성이라는 근거가 없으므로 수집하지 않고,
+        # 이미 받아둔 파일이 있으면 삭제. mal_reports 행은 기록으로 남김 (docs/design.md 참고)
+        removed = _purge_report_artifacts(conn, mal_id)
+        conn.execute(
+            "UPDATE mal_reports SET download_attempted_at = ?, success_count = 0 WHERE mal_id = ?",
+            (now, mal_id),
+        )
+        print(f"[detect] {mal_id}: 철회된 리포트라 수집하지 않음 (기존 파일 {removed}개 삭제)", flush=True)
+        return mal_id
+
     for entry in affected:
         pkg = entry.get("package", {})
         ecosystem = pkg.get("ecosystem")
         name = pkg.get("name")
         if not ecosystem or not name:
             continue
-        versions = _resolve_versions(entry, get_downloader(ecosystem))
+        versions, is_explicit = _resolve_versions(
+            entry, get_downloader(ecosystem), report.get("published")
+        )
         for version in versions:
             conn.execute(
                 "INSERT OR IGNORE INTO collected_artifacts "
-                "(mal_id, registry, package_name, version, download_status) "
-                "VALUES (?, ?, ?, ?, 'pending')",
-                (mal_id, ecosystem, name, version),
+                "(mal_id, registry, package_name, version, is_explicit_version, download_status) "
+                "VALUES (?, ?, ?, ?, ?, 'pending')",
+                (mal_id, ecosystem, name, version, is_explicit),
             )
 
     for ecosystem in ecosystems:
@@ -163,10 +222,16 @@ def _insert_report_and_versions(conn, report: dict) -> str | None:
     return mal_id
 
 
-def backfill(conn, id_prefix: str = BACKFILL_ID_PREFIX) -> list[str]:
+def _current_year_prefix() -> str:
+    return f"MAL-{datetime.now(timezone.utc).year}-"
+
+
+def backfill(conn, id_prefix: str | None = None) -> list[str]:
     """첫 실행(또는 diff 잘림 대체): OSV 벌크 zip(생태계별 all.zip)에서
     id_prefix로 시작하는 리포트를 전부 조회. 개별 파일 조회보다 훨씬 빠름
-    (실측: 개별 조회 292건 1시간+ vs zip 10개 생태계 전체 2분 미만)."""
+    (실측: 개별 조회 292건 1시간+ vs zip 10개 생태계 전체 2분 미만).
+    id_prefix를 주지 않으면 실행 시점의 올해(MAL-<올해>-)를 쓴다."""
+    id_prefix = id_prefix or _current_year_prefix()
     head_sha = github_source.get_head_sha()  # 백필 후 diff 시작점으로 쓸 체크포인트
 
     touched = []
@@ -318,6 +383,16 @@ def download_pending(conn) -> None:
 
         try:
             result = downloader.download(row["package_name"], row["version"])
+        except PlaceholderArtifact:
+            # 레지스트리의 빈 플레이스홀더는 게시일도 악성 코드의 게시일이 아니라서 조회하지 않음
+            conn.execute("DELETE FROM collected_artifacts WHERE rowid = ?", (row["rowid"],))
+            conn.commit()
+            print(
+                f"[download] placeholder: {row['registry']} {row['package_name']}@{row['version']}",
+                flush=True,
+            )
+            _finalize_if_done(conn, mal_id)
+            continue
         except ArtifactNotFound:
             conn.execute("DELETE FROM collected_artifacts WHERE rowid = ?", (row["rowid"],))
             # 다운로드는 실패해도 게시일 메타데이터는 남아있는 경우가 있어 별도로 조회 시도

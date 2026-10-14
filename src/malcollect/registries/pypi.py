@@ -36,6 +36,21 @@ class PypiDownloader(RegistryDownloader):
         resp.raise_for_status()
         return list(resp.json().get("releases", {}).keys())
 
+    def list_versions_with_dates(self, name: str) -> list[tuple[str, str | None]]:
+        url = f"https://pypi.org/pypi/{name}/json"
+        resp = get_with_retry(url)
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        result = []
+        for version, files in resp.json().get("releases", {}).items():
+            if not files:
+                result.append((version, None))  # 파일이 모두 삭제된 릴리스는 게시일을 알 수 없음
+                continue
+            target = next((f for f in files if f.get("packagetype") == "sdist"), files[0])
+            result.append((version, target.get("upload_time_iso_8601")))
+        return result
+
     def get_published_at(self, name: str, version: str) -> str | None:
         url = f"https://pypi.org/pypi/{name}/{version}/json"
         resp = get_with_retry(url)

@@ -24,8 +24,10 @@ CREATE TABLE IF NOT EXISTS collected_artifacts (
   registry TEXT,                 -- 이 샘플을 실제로 수집한 레지스트리 (예: npm)
   package_name TEXT,
   version TEXT,
+  is_explicit_version INTEGER,   -- 1=OSV 리포트가 이 버전을 직접 명시, 0=상한 없는 range라서 우리가 list_versions()로 나열 (우리 파이프라인 판정값)
   download_status TEXT,          -- 'pending'(시도 전) 또는 'success'만 존재
   osv_verification_status TEXT,  -- NULL / 'withdrawn' / 'mismatch' - verify.py만 갱신
+  review_label TEXT,             -- 사람이 이 파일을 검토한 결과. NULL=미검토 / 'confirmed_malicious' / 'false_positive'(위악성) / 'research_poc'(연구용 PoC). 수집 루프는 건드리지 않음, 근거는 docs/review_notes.md
   downloaded_at TEXT,            -- 우리가 이 파일을 다운로드한 시각 (초 단위)
   registry_published_at TEXT,    -- 레지스트리에 이 버전이 실제 게시된 시각 (레지스트리 원본값)
   file_path TEXT,
@@ -115,15 +117,17 @@ def _rebuild_collected_artifacts(conn: sqlite3.Connection) -> None:
         registry = r.get("registry") or r.get("ecosystem")  # ecosystem -> registry 이름 변경
         conn.execute(
             "INSERT OR IGNORE INTO collected_artifacts (mal_id, registry, package_name, version, "
-            "download_status, osv_verification_status, downloaded_at, registry_published_at, "
-            "file_path, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "is_explicit_version, download_status, osv_verification_status, review_label, downloaded_at, "
+            "registry_published_at, file_path, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 r.get("mal_id"),
                 registry,
                 r.get("package_name"),
                 r.get("version"),
+                r.get("is_explicit_version"),
                 r.get("download_status"),
                 r.get("osv_verification_status"),
+                r.get("review_label"),
                 r.get("downloaded_at"),
                 r.get("registry_published_at"),
                 r.get("file_path"),
@@ -142,7 +146,9 @@ _MAL_REPORTS_NEW_COLS = [
 ]
 _COLLECTED_ARTIFACTS_NEW_COLS = [
     ("mal_id", "TEXT"), ("registry", "TEXT"), ("package_name", "TEXT"), ("version", "TEXT"),
-    ("download_status", "TEXT"), ("osv_verification_status", "TEXT"), ("downloaded_at", "TEXT"),
+    ("is_explicit_version", "INTEGER"),
+    ("download_status", "TEXT"), ("osv_verification_status", "TEXT"), ("review_label", "TEXT"),
+    ("downloaded_at", "TEXT"),
     ("registry_published_at", "TEXT"), ("file_path", "TEXT"), ("sha256", "TEXT"),
 ]
 _MAL_REPORTS_CREATE = """
@@ -166,8 +172,10 @@ CREATE TABLE collected_artifacts (
   registry TEXT,
   package_name TEXT,
   version TEXT,
+  is_explicit_version INTEGER,
   download_status TEXT,
   osv_verification_status TEXT,
+  review_label TEXT,
   downloaded_at TEXT,
   registry_published_at TEXT,
   file_path TEXT,

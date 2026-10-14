@@ -1,4 +1,4 @@
-from .base import ArtifactNotFound, DownloadResult, RegistryDownloader
+from .base import ArtifactNotFound, DownloadResult, PlaceholderArtifact, RegistryDownloader
 from .crates import CratesDownloader
 from .go import GoDownloader
 from .hex import HexDownloader
@@ -31,6 +31,7 @@ def get_downloader(ecosystem: str) -> RegistryDownloader | None:
 
 __all__ = [
     "ArtifactNotFound",
+    "PlaceholderArtifact",
     "DownloadResult",
     "RegistryDownloader",
     "DOWNLOADERS",
