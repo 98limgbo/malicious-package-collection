@@ -1,6 +1,6 @@
 # malicious-package-collection
 
-악성 패키지 탐지 연구용 데이터셋 수집 도구. 설계 배경과 결정 근거, 수집하지 않는 대상(철회된 리포트, 리포트 등록일 이후 버전, npm 보안 홀딩 더미)은 [`docs/design.md`](docs/design.md)에 있다.
+악성 패키지 탐지 연구용 데이터셋 수집 도구. 설계 배경과 결정 근거, 수집하지 않는 대상은 [`docs/design.md`](docs/design.md)에 있다.
 
 ## 빠른 시작
 
