@@ -10,7 +10,7 @@ import requests
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from malcollect.collect import run  # noqa: E402
+from malcollect.collect import run, startup_checks  # noqa: E402
 
 
 def _print_hint_if_github_rate_limit(exc: Exception) -> None:
@@ -45,6 +45,8 @@ if __name__ == "__main__":
         help="한 번 실행 후 종료하지 않고, 5분마다 계속 반복 실행 (Ctrl+C로 종료)",
     )
     args = parser.parse_args()
+
+    startup_checks()  # 시작할 때 한 번만. 5분 주기 루프에는 넣지 않는다
 
     if not args.loop:
         run(test_since_days=args.since_days)

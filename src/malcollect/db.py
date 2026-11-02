@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS mal_reports (
   collected_at TEXT,            -- 처음 감지한 시각 (우리 파이프라인, 초 단위)
   download_attempted_at TEXT,   -- 모든 버전 다운로드 시도가 끝난 시각 (NULL=진행중, 초 단위)
   success_count INTEGER DEFAULT 0,   -- 확보한 파일 개수 (collected_artifacts 조인 없이 조회용)
-  osv_withdrawn_at TEXT,        -- NULL=유효, 값 있으면 철회(오탐 등) - verify.py만 갱신, OSV 원본값
-  osv_last_checked_at TEXT,     -- 마지막 재검증 시각 (verify.py, 우리 파이프라인, 초 단위)
+  osv_withdrawn_at TEXT,        -- NULL=유효, 값 있으면 철회(오탐 등), OSV 원본값 (수집 루프가 리포트를 처리할 때 갱신)
+  osv_last_checked_at TEXT,     -- OSV 리포트를 마지막으로 처리한 시각 (우리 파이프라인, 초 단위)
   osv_modified_at TEXT,         -- OSV 리포트 마지막 수정일 (중복 처리 방지, OSV 원본값)
   osv_credits_finder TEXT,      -- report.json의 credits 중 type=FINDER인 이름
   osv_published_at TEXT,        -- OSV 등록일 ("발견일"의 근사치, OSV 원본값)
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS collected_artifacts (
   version TEXT,
   is_explicit_version INTEGER,   -- 1=OSV 리포트가 이 버전을 직접 명시, 0=상한 없는 range라서 우리가 list_versions()로 나열 (우리 파이프라인 판정값)
   download_status TEXT,          -- 'pending'(시도 전) 또는 'success'만 존재
-  osv_verification_status TEXT,  -- NULL / 'withdrawn' / 'mismatch' - verify.py만 갱신
+  osv_verification_status TEXT,  -- NULL=현재 리포트와 맞음 / 'mismatch'=리포트가 이 패키지의 버전을 명시하는데 이 파일의 버전이 목록에 없음 (수집 시작 시 한 번 점검)
   review_label TEXT,             -- NULL=미검토 / 'confirmed_malicious' / 'false_positive'(위악성) / 'research_poc'(연구용 PoC) / 'tea_token'(tea.xyz 캠페인, scripts/label_campaign.py가 규칙으로 부여). 수집 루프는 건드리지 않음, 근거는 docs/review_notes.md
   downloaded_at TEXT,            -- 우리가 이 파일을 다운로드한 시각 (초 단위)
   registry_published_at TEXT,    -- 레지스트리에 이 버전이 실제 게시된 시각 (레지스트리 원본값)

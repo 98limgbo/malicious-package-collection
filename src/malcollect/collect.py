@@ -2,6 +2,7 @@
 
 실행: python scripts/run_collect.py [--since-days N] [--loop]
 5분 주기로 반복 실행되는 것을 전제로 한다 (docs/design.md 참고).
+시작할 때 한 번만 startup_checks()가 파일의 버전을 현재 리포트와 대조한다 (주기 루프에는 넣지 않음).
 
 동작 순서:
 1. sync_state에 체크포인트가 없으면(첫 실행) -> OSV 벌크 zip(생태계별 all.zip)에서
@@ -441,6 +442,62 @@ def finalize_reports(conn) -> None:
     ).fetchall()
     for row in candidates:
         _finalize_if_done(conn, row["mal_id"])
+
+
+def mark_version_mismatch(conn) -> tuple[int, int]:
+    """수집한 파일의 버전이 현재 리포트의 명시 목록과 맞는지 점검해서 osv_verification_status를 갱신한다.
+
+    리포트가 그 패키지의 버전을 직접 명시하는데 파일의 버전이 목록에 없으면 'mismatch', 그 외에는 NULL.
+    전체조회 리포트는 명시 목록이 없으므로 점검 대상이 아니다. 매번 처음부터 계산하므로 리포트가 바뀌어
+    목록에 다시 들어오면 저절로 해제된다. 파일 전체를 훑어서 비용이 있으므로 시작할 때 한 번만 부른다.
+    (표시한 개수, 해제한 개수)를 반환."""
+    rows = conn.execute(
+        "SELECT rowid, mal_id, registry, package_name, version, osv_verification_status "
+        "FROM collected_artifacts WHERE download_status = 'success'"
+    ).fetchall()
+    explicit_by_report: dict[tuple, dict | None] = {}
+    to_mark, to_clear = [], []
+    for r in rows:
+        key = (r["registry"], r["mal_id"])
+        if key not in explicit_by_report:
+            path = config.DATA_DIR / _sanitize_path_component(r["registry"]) / r["mal_id"] / "report.json"
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                explicit_by_report[key] = None
+                continue
+            explicit: dict[str, set] = {}
+            for entry in report.get("affected", []):
+                name = entry.get("package", {}).get("name")
+                if name and entry.get("versions"):
+                    explicit.setdefault(name, set()).update(entry["versions"])
+            explicit_by_report[key] = explicit
+        explicit = explicit_by_report[key]
+        if explicit is None:
+            continue
+        listed = explicit.get(r["package_name"])
+        is_mismatch = listed is not None and r["version"] not in listed
+        current = r["osv_verification_status"]
+        if is_mismatch and current != "mismatch":
+            to_mark.append((r["rowid"],))
+        elif not is_mismatch and current is not None:
+            to_clear.append((r["rowid"],))
+
+    conn.executemany("UPDATE collected_artifacts SET osv_verification_status = 'mismatch' WHERE rowid = ?", to_mark)
+    conn.executemany("UPDATE collected_artifacts SET osv_verification_status = NULL WHERE rowid = ?", to_clear)
+    conn.commit()
+    return len(to_mark), len(to_clear)
+
+
+def startup_checks() -> None:
+    """프로그램을 시작할 때 한 번만 하는 점검. 5분 주기 루프(run)에는 넣지 않는다."""
+    db.init_db()
+    with db.connect() as conn:
+        marked, cleared = mark_version_mismatch(conn)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM collected_artifacts WHERE osv_verification_status = 'mismatch'"
+        ).fetchone()[0]
+    print(f"[startup] 버전 점검: 새로 표시 {marked}개, 해제 {cleared}개 (현재 mismatch 총 {total}개)", flush=True)
 
 
 def run(test_since_days: int | None = None) -> None:
