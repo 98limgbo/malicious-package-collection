@@ -1,6 +1,6 @@
 # 검토 기록
 
-`collected_artifacts.review_label`에 값을 넣은 리포트와 패키지별로 판단 근거를 기록한 문서이다. 라벨은 수집 루프가 만들지 않고, 사람이 리포트와 파일을 확인한 뒤 가끔 채운다. 판단 단위는 리포트가 아니라 파일(패키지-버전)이다. 한 리포트 안에 진짜 악성 버전과 오탐 버전이 섞일 수 있기 때문이다. 근거는 정적 점검(코드를 실행하지 않음)만으로 확인한 것이다. 더 일반적인 품질 이슈는 [`data_quality_notes.md`](data_quality_notes.md)를 참고한다.
+`collected_artifacts.review_label`에 값을 넣은 리포트와 패키지별로 판단 근거를 기록한 문서이다. 라벨은 수집 루프가 만들지 않고, 사람이 리포트와 파일을 확인한 뒤 가끔 채운다. 판단 단위는 리포트가 아니라 파일(패키지-버전)이다. 한 리포트 안에 진짜 악성 버전과 오탐 버전이 섞일 수 있기 때문이다. 
 
 ## 라벨의 의미
 
@@ -10,6 +10,7 @@
 | `confirmed_malicious` | 검토했고 악성이 맞음 |
 | `false_positive` | 검토했고 이 파일에는 악성 동작이 없다고 판단함 (위악성) |
 | `research_poc` | 검토했고 동작은 악성과 같지만 의도는 승인된 보안 연구임 |
+| `tea_token` | `tea.xyz` 토큰 보상 캠페인 패키지. 사람이 하나씩 확인한 것이 아니라 리포트 설명문의 문구 규칙으로 일괄 부여함 |
 
 ## 위악성 (`false_positive`)
 
@@ -43,6 +44,16 @@ Ubiquiti 버그바운티(HackerOne)용 의존성 혼동(dependency confusion) �
 - Amazon Inspector가 설명에서 연구 목적이라는 표방이 영향 범위를 제한하지 않는다고 명시한다. `MAL-2026-5289`는 OpenSSF Package Analysis도 지목했다.
 - 따라서 이 파일들은 오탐이 아니다. 동작은 악성 패키지와 같고 의도만 연구이다. 라벨을 동작 기준으로 둘지 의도 기준으로 둘지에 따라 해석이 달라지므로 별도 값으로 구분했다.
 
+## 캠페인 패키지 (`tea_token`)
+
+`tea.xyz` 토큰 보상 캠페인 패키지는 양이 많아서(우리 데이터의 리포트 61,595건, 파일 61,841개) 다른 파일과 섞이지 않도록 따로 표시한다. 다른 라벨과 달리 사람이 파일을 하나씩 확인한 결과가 아니다.
+
+- 부여 규칙: 리포트 `details`에 `tea.xyz`라는 문구가 있으면 그 리포트의 파일 전체에 부여한다. `scripts/label_campaign.py --apply`를 사람이 실행할 때만 부여되고 수집 루프는 부여하지 않는다. 이미 라벨이 있는 파일은 덮어쓰지 않는다.
+- 규칙의 근거: 이 문구가 있는 리포트의 설명문은 전부 같은 캠페인 서술이다. 자동 발행 스크립트로 임의의 이름의 파생 패키지를 계속 발행해서 tea 프로토콜 토큰 보상용 평판 점수를 부풀린다는 내용이다.
+- 알려진 한계: 문구가 없는 캠페인 패키지는 가려내지 못한다. 패키지 안의 `tea.yaml`이나 자동 발행 스크립트로 가려내는 방법은 표본에서 2%만 해당해서 쓸 수 없었다. 문구 없이 "악성 코드가 있다"는 한 문장뿐인 리포트에 같은 캠페인이 섞여 있을 수 있지만 확인할 방법이 없다.
+- 이 값은 스팸인지 악성인지에 대한 판단을 담지 않고 캠페인 소속만 나타낸다. 저장소 정의에서 스팸은 "악성은 아니지만 경계 사례로 허용"되고(`presentation_prep`의 별도 정리 참고), 해석은 분석하는 쪽이 한다.
+- 부여 직후 현황(2026-11-02): `tea_token` 61,841개, 미검토 6,341개, `false_positive` 5개, `research_poc` 10개이다.
+
 ## 후보 탐색 방법과 검증
 
 `scripts/find_review_candidates.py`는 로컬에 남은 리포트의 `details`(탐지 도구가 쓴 설명문)에서 후보를 찾아 걸린 문장과 함께 출력한다. DB는 읽지도 쓰지도 않고, 라벨은 사람이 문장을 읽은 뒤 직접 채운다. 코드를 실행하지 않는 정적 분석이므로 판정이 아니라 후보를 좁히는 용도이다.
@@ -73,8 +84,17 @@ SELECT * FROM collected_artifacts
 WHERE download_status = 'success'
   AND (review_label IS NULL OR review_label NOT IN ('false_positive'));
 
--- 연구용 PoC까지 제외
+-- 캠페인 패키지(tea_token)도 제외
 SELECT * FROM collected_artifacts
 WHERE download_status = 'success'
-  AND (review_label IS NULL OR review_label = 'confirmed_malicious');
+  AND (review_label IS NULL OR review_label NOT IN ('false_positive', 'tea_token'));
+
+-- 연구용 PoC까지 제외하고 검토를 마친 악성만 (미검토는 제외됨)
+SELECT * FROM collected_artifacts
+WHERE download_status = 'success'
+  AND review_label = 'confirmed_malicious';
+
+-- 캠페인 패키지만
+SELECT * FROM collected_artifacts
+WHERE download_status = 'success' AND review_label = 'tea_token';
 ```

@@ -82,6 +82,15 @@ python scripts/find_review_candidates.py --sample 20 --seed 1  # 무작위 표�
 
 리포트 설명문에서 탐지 도구가 스스로 근거의 한계를 인정한 표현이나, 작성자가 연구용이라고 표방했다는 언급을 찾는다. 판정이 아니라 후보를 좁히는 용도이며, 검증 결과와 한계는 [`docs/review_notes.md`](docs/review_notes.md)에 있다. 사람이 후보를 확인한 뒤 `collected_artifacts.review_label`을 직접 채운다.
 
+`tea.xyz` 캠페인처럼 양이 많은 패키지는 사람이 하나씩 확인할 수 없어서, 리포트 설명문의 문구 규칙으로 일괄 부여한다.
+
+```powershell
+python scripts/label_campaign.py            # 집계만 (DB 변경 없음)
+python scripts/label_campaign.py --apply    # tea_token 라벨 부여 (이미 라벨이 있는 파일은 건드리지 않음)
+```
+
+새로 수집된 파일은 라벨이 비어 있으므로 필요할 때 다시 실행하면 된다.
+
 ## 데이터 구조
 
 ```
@@ -115,7 +124,7 @@ dataset/index.sqlite                     # 공유용 DB 최신본 (--publish로 
 - `is_explicit_version`: 1이면 OSV 리포트가 이 버전을 직접 명시한 것이고, 0이면 상한 없는 범위라서 수집 시점에 레지스트리의 버전을 나열해서 받은 것
 - `download_status`: `pending`(시도 전) 또는 `success`만 존재
 - `osv_verification_status`: NULL / `withdrawn` / `mismatch`. `run_verify.py`만 갱신
-- `review_label`: 사람이 이 파일을 검토한 결과. NULL이면 미검토이고, `confirmed_malicious`(악성이 맞음), `false_positive`(위악성), `research_poc`(동작은 악성이지만 의도는 승인된 연구) 중 하나이다. 수집 루프는 건드리지 않고, 판단 근거는 [`docs/review_notes.md`](docs/review_notes.md)에 기록한다
+- `review_label`: 이 파일을 검토하거나 분류한 결과. NULL이면 미검토이고, `confirmed_malicious`(악성이 맞음), `false_positive`(위악성), `research_poc`(동작은 악성이지만 의도는 승인된 연구), `tea_token`(`tea.xyz` 토큰 보상 캠페인 패키지) 중 하나이다. 수집 루프는 건드리지 않고, 판단 근거와 부여 규칙은 [`docs/review_notes.md`](docs/review_notes.md)에 기록한다
 - `downloaded_at`: 우리가 이 파일을 다운로드한 시각
 - `registry_published_at`: 레지스트리에 이 버전이 실제 게시된 시각
 - `file_path`: 로컬 저장 경로
