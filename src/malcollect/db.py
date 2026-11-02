@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS collected_artifacts (
   is_explicit_version INTEGER,   -- 1=OSV 리포트가 이 버전을 직접 명시, 0=상한 없는 range라서 우리가 list_versions()로 나열 (우리 파이프라인 판정값)
   download_status TEXT,          -- 'pending'(시도 전) 또는 'success'만 존재
   osv_verification_status TEXT,  -- NULL / 'withdrawn' / 'mismatch' - verify.py만 갱신
-  review_label TEXT,             -- 사람이 이 파일을 검토한 결과. NULL=미검토 / 'confirmed_malicious' / 'false_positive'(위악성) / 'research_poc'(연구용 PoC). 수집 루프는 건드리지 않음, 근거는 docs/review_notes.md
+  review_label TEXT,             -- NULL=미검토 / 'confirmed_malicious' / 'false_positive'(위악성) / 'research_poc'(연구용 PoC) / 'tea_token'(tea.xyz 캠페인, scripts/label_campaign.py가 규칙으로 부여). 수집 루프는 건드리지 않음, 근거는 docs/review_notes.md
   downloaded_at TEXT,            -- 우리가 이 파일을 다운로드한 시각 (초 단위)
   registry_published_at TEXT,    -- 레지스트리에 이 버전이 실제 게시된 시각 (레지스트리 원본값)
   file_path TEXT,
