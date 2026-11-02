@@ -8,19 +8,18 @@
 - [저장 원칙](#저장-원칙)
 - [보존 정책](#보존-정책)
 - [수집 (collect.py)](#수집-collectpy)
-- [재검증 (verify.py, on-demand)](#재검증-verifypy-on-demand)
+- [재검증 도구를 삭제한 이유](#재검증-도구를-삭제한-이유)
 - [검토 라벨 (review_label)](#검토-라벨-review_label)
 - [참고 자료](#참고-자료)
 
 ## 배경 / 목적
 - 악성 패키지 탐지 연구의 타당성 검증을 위해 npm, PyPI, RubyGems 외 다양한 레지스트리(crates.io, Packagist, Go, Maven, NuGet, Hex, Pub)에서 악성 패키지 **원본 파일**을 수집한다.
-- 데이터 소스: [ossf/malicious-packages](https://github.com/ossf/malicious-packages) (GitHub, 원본) / [OSV.dev](https://osv.dev) (재검증용 API)
+- 데이터 소스: [ossf/malicious-packages](https://github.com/ossf/malicious-packages) (GitHub, 원본) / [OSV.dev](https://osv.dev) (백필과 통계 조사에 쓰는 벌크 데이터)
 - 핵심 제약: 악성 패키지는 보고된 후 원본 레지스트리에서 빠르게(수시간~수일 내) 삭제되는 경향이 있어, 최대한 빠르게 감지하고 다운로드해야 한다.
 
 ## 전체 구조 요약
 
 - **수집(`collect.py`)**: 새로운 악성 패키지 리포트가 보고됐는지 감지하고, 발견되면 즉시 다운로드 시도. GitHub diff로 5분 주기 자동 반복 실행한다.
-- **재검증(`verify.py`)**: 이미 수집한 리포트가 철회되지 않았는지, 수집한 버전이 최신 리포트의 버전 목록과 여전히 일치하는지 OSV API로 확인. 자동 스케줄 없이 필요할 때 수동 실행한다.
 
 ## 저장 원칙
 - `data/<registry>/<MAL-ID>/` 구조로 저장한다. 한 리포트가 여러 생태계·여러 버전의
@@ -58,8 +57,8 @@
 
 ## 수집 (`collect.py`)
 
-### 감지 신호: GitHub 우선, OSV는 재검증 전용
-OSV.dev의 importer는 GitHub 등 소스를 15분 주기로만 폴링해 반영하는 구조적 지연이 있다. `ossf/malicious-packages`(GitHub)가 원본(canonical)이므로 감지는 GitHub에서 직접 한다 (OSV.dev API는 재검증 전용).
+### 감지 신호: GitHub 우선
+OSV.dev의 importer는 GitHub 등 소스를 15분 주기로만 폴링해 반영하는 구조적 지연이 있다. `ossf/malicious-packages`(GitHub)가 원본(canonical)이므로 감지는 GitHub에서 직접 한다. OSV.dev API는 쓰지 않고, 백필에만 OSV 벌크 파일을 쓴다.
 
 ### 첫 실행: 벌크 zip 백필
 `sync_state`에 체크포인트가 없으면(첫 실행) 그해(`MAL-<연도>-*`) 리포트 전체를 백필한다.
@@ -101,19 +100,18 @@ OSV.dev의 importer는 GitHub 등 소스를 15분 주기로만 폴링해 반영�
 
 **미러 폴백은 없음** — jsDelivr(npm), Software Heritage(범용) 둘 다 검증해봤으나 필요한 시점에 콘텐츠가 없거나(SWH는 크롤링 주기가 삭제 속도를 못 따라감) 악성 코드가 이미 제거된 상태(jsDelivr, 12건 전수조사 100% 무해 파일만 남음)라 무의미했음.
 
-### 다운로드 완료 판정 (즉시 처리)
+### 다운로드 완료 판정
 `download_pending()`이 파일 하나를 처리할 때마다 그 자리에서 바로 확인: 그 리포트에 남은 `pending`이 없으면 즉시 `download_attempted_at` 기록 + 성공 0건이면 폴더 삭제. (전체 배치가 끝난 뒤 한꺼번에 처리하면 "처리 시각"이 부정확해지므로 인라인으로 처리) 실행이 중간에 끊겨 인라인 처리를 못 받은 리포트는 다음 실행 끝의 안전망(`finalize_reports`)이 훑어서 정리.
 
-## 재검증 (`verify.py`, on-demand)
+## 재검증 도구를 삭제한 이유
 
-**대상**: `success_count > 0`인 리포트만 (파일 없는 리포트는 검증할 대상이 없음).
+OSV API로 리포트를 다시 조회해서 철회와 버전 불일치를 `osv_verification_status`에 기록하던 `verify.py`와 `run_verify.py`를 삭제했다. 한 번도 실행한 적이 없었고, 이유는 세 가지이다.
 
-각 대상마다:
-1. OSV API로 최신 리포트 조회, `osv_last_checked_at`은 결과와 무관하게 항상 갱신
-2. `mal_reports.osv_modified_at`과 비교해 변경 없으면 종료
-3. 변경 있으면 `report.json` 갱신 + `mal_reports.osv_modified_at`/`osv_withdrawn_at` 갱신
-4. 철회 상태면 → 이 mal_id의 `collected_artifacts` 전 행을 `osv_verification_status='withdrawn'`. 다만 정상 운영에서는 수집 단계가 철회를 감지하는 즉시 파일을 삭제하므로, 이 분기는 감지가 누락된 경우의 안전망이다.
-5. 철회 아니면 → 성공한 각 버전이 최신 리포트의 버전 목록에도 있는지 확인 → 없으면 `mismatch`, 있으면 NULL로 리셋 (재검증마다 처음부터 다시 판정하므로 상태 복구도 자동으로 됨)
+- 철회는 수집 루프가 리포트를 처리할 때 감지해서 파일을 삭제한다. 그래서 이 도구가 하던 철회 감지는 이미 수집 단계로 옮겨졌다.
+- 버전 불일치 판정이 리포트의 명시 목록(`versions`)만 보기 때문에, 전체조회로 받은 파일은 목록이 없어서 모두 `mismatch`로 표시될 수 있었다.
+- 리포트마다 API를 한 번씩 호출하는 방식이라 파일을 가진 리포트 6만여 건에는 너무 느리다. 백필에서 확인했듯 개별 조회는 1시간 넘게 걸리고 벌크 파일은 2분 미만이다.
+
+다만 이 도구가 하던 일 중 하나는 여전히 필요해서 다른 방식으로 옮겼다. 전체조회로 받은 리포트가 나중에 버전 명시로 바뀌면, 이전에 받은 파일이 새 명시 목록에 없는 경우가 생긴다. 이 상태를 `osv_verification_status`에 `mismatch`로 기록한다. 점검은 수집 프로그램을 시작할 때 한 번만 하고(`startup_checks()`), 5분 주기 루프에는 넣지 않는다. 로컬 `report.json` 파일 6만여 개를 읽는 작업이고 한 번 점검하는 데 약 4초가 걸린다(2026-11-02 측정, 파일이 캐시에 있는 상태). 시작할 때마다 처음부터 다시 계산하므로, 리포트가 바뀌어 목록에 다시 들어온 파일은 다음 시작 때 저절로 해제된다. 루프를 오래 켜 두면 그동안 생긴 불일치는 다음 시작 때까지 표시되지 않는다. 판정은 리포트가 그 패키지의 버전을 명시하는데 파일의 버전이 목록에 없을 때만 하고, 전체조회 리포트는 대상이 아니다. 삭제한 코드는 git 이력의 `src/malcollect/verify.py`에서 볼 수 있다.
 
 ## 검토 라벨 (`review_label`)
 

@@ -6,11 +6,13 @@ data/*
 backups/
 research_notes/
 presentation_prep/
+
+run.txt
+TODO.md
+COMMIT_GUIDE.md
 CLAUDE.md
+
 __pycache__/
 *.pyc
 .env
 .venv/
-run.txt
-TODO.md
-COMMIT_GUIDE.md
