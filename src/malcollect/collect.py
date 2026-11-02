@@ -133,7 +133,7 @@ def _purge_report_artifacts(conn, mal_id: str) -> int:
     removed = 0
     for row in rows:
         if row["file_path"]:
-            path = Path(row["file_path"])
+            path = config.DATA_DIR / row["file_path"]
             if path.exists():
                 path.unlink()
                 removed += 1
@@ -423,7 +423,7 @@ def download_pending(conn) -> None:
         conn.execute(
             "UPDATE collected_artifacts SET download_status = 'success', file_path = ?, sha256 = ?, "
             "downloaded_at = ?, registry_published_at = ? WHERE rowid = ?",
-            (str(file_path), result.sha256, _now(), result.published_at, row["rowid"]),
+            (file_path.relative_to(config.DATA_DIR).as_posix(), result.sha256, _now(), result.published_at, row["rowid"]),
         )
         conn.execute(
             "UPDATE mal_reports SET success_count = success_count + 1 WHERE mal_id = ?",

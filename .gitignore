@@ -1,7 +1,6 @@
 data/*
 !data/.gitkeep
 *.sqlite
-!dataset/index.sqlite
 *.sqlite-journal
 backups/
 research_notes/
