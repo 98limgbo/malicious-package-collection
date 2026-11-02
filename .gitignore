@@ -6,7 +6,7 @@ data/*
 backups/
 research_notes/
 presentation_prep/
-presentation_prep/
+CLAUDE.md
 __pycache__/
 *.pyc
 .env
